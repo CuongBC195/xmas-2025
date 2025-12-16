@@ -19,23 +19,17 @@ const GIFT_COLORS = [
   { box: "#8b4513", boxDark: "#5c2d0e", ribbon: "#daa520", ribbonLight: "#fff5e0" },  // Bronze + Gold
 ]
 
-const WISHES = [
- "Những ngày này chắc khá bận, mong bạn nhớ giữ sức và đừng tự gây áp lực cho mình.😊",
+const STEPS = [
+  "🎁 Wooo~ mở được hộp đầu tiên rồi nè! Mới khởi động thôi, mở tiếp hộp kế tiếp đi 😄",
+  "✨ Hộp này cũng dễ thương ha. Nhưng hình như chưa phải điều bất ngờ đâu, mở hộp tiếp theo thử xem?",
+  "🎄 Cảm giác mở hộp vậy có thấy vui không? Nhưng khoan, bất ngờ thật sự chắc ở phía sau đó~",
+  "💫 Vẫn chưa hết đâu nha. Có người gửi mấy chiếc hộp này đang hồi hộp lắm đó, mở tiếp đi 😳",
+  "💌 Mỗi hộp mở ra là một chút cảm xúc được giấu kỹ. Nhưng còn một hộp nữa nè…",
+  "🤍 Gần tới rồi đó. Điều trong hộp sau là thứ người gửi suy nghĩ rất lâu trước khi viết ra.",
+  "😳 Hộp này làm người gửi tim đập nhanh hơn một xíu. Mở hộp cuối cùng nha…",
+  "🎁 Cuối cùng cũng tới rồi. Điều bất ngờ này là thật lòng: mình thích bạn. Noel này, cho mình cơ hội được ở bên bạn nhiều hơn nhé 💝"
+];
 
- "Khối lượng công việc có nhiều, nhưng những gì bạn làm đang đi đúng hướng.💪",
-
- "Cuối năm rồi, mong bạn vẫn vững tin vào con đường mình đã chọn.😚",
-
- "Hy vọng những nỗ lực của bạn sớm mang lại kết quả xứng đáng.🤜🤛",
-
- "Chúc công việc của bạn ngày càng thuận lợi và rõ ràng hơn.👩‍💻",
-
- "Mong một năm làm việc hiệu quả, thu về nhiều thành quả đáng tự hào.🎁",
-
- "Giữa guồng quay bận rộn, mong bạn vẫn tìm được cảm giác nhẹ lòng.💖",
-
- "Chúc bạn luôn giữ được năng lượng tích cực cho những chặng đường phía trước.🤩"
-]
 
 const BASE_SPHERE_COUNT = 1900
 const MAX_SPHERE_COUNT = 5000
@@ -71,8 +65,10 @@ interface GiftBox {
   isOpened: boolean
   openAnimation: number
   zoomThreshold: number
-  floatOffset: number  // For floating animation
-  sparklePhase: number // For sparkle timing
+  floatOffset: number
+  sparklePhase: number
+  isBouncing: boolean  // Whether this gift is bouncing to attract attention
+  bounceStartTime: number // When bounce animation started
 }
 
 interface Particle {
@@ -88,8 +84,9 @@ interface Particle {
 
 export function ChristmasTreeHero() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const [activeWish, setActiveWish] = useState<{ text: string; x: number; y: number } | null>(null)
+  const [activeWish, setActiveWish] = useState<{ text: string } | null>(null)
   const [showWish, setShowWish] = useState(false)
+  const [currentStep, setCurrentStep] = useState(0) // Track which step we're on
   
   const rotationRef = useRef(0)
   const rotationXRef = useRef(0)
@@ -103,6 +100,7 @@ export function ChristmasTreeHero() {
   const particlesRef = useRef<Particle[]>([])
   const giftBoxesRef = useRef<GiftBox[]>([])
   const wishTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const currentStepRef = useRef(0) // Track step for sequential messages
   
   const targetZoomRef = useRef(1)
   const targetExplodeRef = useRef(0)
@@ -198,14 +196,16 @@ export function ChristmasTreeHero() {
         origX: x,
         origY: y,
         origZ: z,
-        size: 28 + Math.random() * 12,
+        size: 32 + Math.random() * 10,
         colorIndex: i % GIFT_COLORS.length,
-        wishIndex: i % WISHES.length,
+        wishIndex: i,
         isOpened: false,
         openAnimation: 0,
-        zoomThreshold: 1.5 + Math.random() * 0.5,
-        floatOffset: Math.random() * Math.PI * 2,  // Random start phase for floating
-        sparklePhase: Math.random() * Math.PI * 2, // Random sparkle phase
+        zoomThreshold: 1.3 + Math.random() * 0.3,
+        floatOffset: Math.random() * Math.PI * 2,
+        sparklePhase: Math.random() * Math.PI * 2,
+        isBouncing: false,
+        bounceStartTime: 0,
       })
     }
     giftBoxesRef.current = giftBoxes
@@ -367,7 +367,7 @@ export function ChristmasTreeHero() {
       ctx.globalAlpha = 1
     }
 
-    // Draw a beautiful 3D gift box with refined design
+    // Draw a clean, visible gift box
     const drawGiftBox = (
       ctx: CanvasRenderingContext2D,
       x: number,
@@ -378,215 +378,187 @@ export function ChristmasTreeHero() {
       isHovered: boolean,
       openAnimation: number,
       floatOffset: number,
-      sparklePhase: number,
+      _sparklePhase: number,
+      isBouncing: boolean,
+      bounceStartTime: number,
       alpha: number = 1,
     ) => {
       const time = Date.now() * 0.001
-      const actualSize = size * scale
+      const now = Date.now()
+      const actualSize = size * scale * 1.3
       const colors = GIFT_COLORS[colorIndex]
       
-      // Floating animation
-      const floatY = Math.sin(time * 1.5 + floatOffset) * actualSize * 0.08
-      const floatRotation = Math.sin(time * 0.8 + floatOffset) * 0.03
-      y += floatY
+      // Bounce animation (gentle bobbing)
+      let bounceY = 0
+      let bounceScale = 1
+      if (isBouncing && bounceStartTime > 0) {
+        const bounceTime = (now - bounceStartTime) / 1000
+        // Slow, gentle bouncing
+        const bounceFreq = 1.5 // slower bounces per second
+        const bouncePhase = bounceTime * bounceFreq * Math.PI * 2
+        const bounceDecay = Math.max(0, 1 - bounceTime * 0.08) // Very slow fade
+        // Smooth sine wave for gentle motion
+        bounceY = Math.sin(bouncePhase) * actualSize * 0.15 * bounceDecay
+        bounceScale = 1 + Math.sin(bouncePhase) * 0.03 * bounceDecay
+      }
       
-      // Hover scale animation
-      const hoverScale = isHovered ? 1 + Math.sin(time * 4) * 0.05 + 0.08 : 1
-      const finalSize = actualSize * hoverScale
+      // Gentle floating (only when not bouncing)
+      const floatY = isBouncing ? 0 : Math.sin(time * 1.2 + floatOffset) * actualSize * 0.05
+      y += floatY - bounceY // Subtract bounceY because we want to go UP
+      
+      // Hover scale + bounce scale
+      const hoverScale = isHovered ? 1.12 : 1
+      const finalSize = actualSize * hoverScale * bounceScale
       
       ctx.save()
       ctx.globalAlpha = alpha
-      ctx.translate(x, y)
-      ctx.rotate(floatRotation)
-      ctx.translate(-x, -y)
       
-      const boxWidth = finalSize * 0.9
-      const boxHeight = finalSize * 0.75
-      const cornerRadius = finalSize * 0.08
-      const depth3D = finalSize * 0.15
+      const boxWidth = finalSize
+      const boxHeight = finalSize * 0.8
+      const cornerRadius = finalSize * 0.1
       
-      // Opening animation values
-      const lidLift = openAnimation * finalSize * 0.8
-      const lidTilt = openAnimation * 0.6
-      const lightBurst = openAnimation
+      // Opening animation
+      const lidLift = openAnimation * finalSize * 0.6
       
-      // === SUBTLE SPARKLES around gift (only when not opened) ===
-      if (!openAnimation && isHovered) {
-        const sparkleCount = 4
-        for (let i = 0; i < sparkleCount; i++) {
-          const angle = (time * 0.5 + sparklePhase + (i * Math.PI * 2) / sparkleCount)
-          const dist = finalSize * (0.7 + Math.sin(time * 2 + i) * 0.1)
-          const sx = x + Math.cos(angle) * dist
-          const sy = y + Math.sin(angle) * dist * 0.6 - finalSize * 0.1
-          const sparkleSize = finalSize * 0.03 * (0.5 + Math.sin(time * 4 + i * 1.5) * 0.5)
-          
-          if (sparkleSize > 0.5) {
-            ctx.fillStyle = `rgba(255, 255, 220, ${0.4 + Math.sin(time * 5 + i) * 0.3})`
-            ctx.beginPath()
-            ctx.arc(sx, sy, sparkleSize, 0, Math.PI * 2)
-            ctx.fill()
-          }
-        }
-      }
-      
-      // === SOFT SHADOW ===
-      const shadowY = y + boxHeight * 0.5 + depth3D
-      const shadowScale = 1 - openAnimation * 0.3
-      ctx.fillStyle = "rgba(0, 0, 0, 0.2)"
+      // === OUTER GLOW (always visible, stronger on hover) ===
+      const glowAlpha = isHovered ? 0.5 : 0.25
+      const glowSize = finalSize * 1.5
+      const glowGradient = ctx.createRadialGradient(x, y, finalSize * 0.3, x, y, glowSize)
+      glowGradient.addColorStop(0, `rgba(255, 220, 150, ${glowAlpha})`)
+      glowGradient.addColorStop(0.5, `rgba(255, 200, 100, ${glowAlpha * 0.4})`)
+      glowGradient.addColorStop(1, "rgba(255, 180, 50, 0)")
       ctx.beginPath()
-      ctx.ellipse(x, shadowY + 5, boxWidth * 0.5 * shadowScale, boxWidth * 0.12 * shadowScale, 0, 0, Math.PI * 2)
+      ctx.arc(x, y, glowSize, 0, Math.PI * 2)
+      ctx.fillStyle = glowGradient
       ctx.fill()
       
-      // === BOX BODY (3D) ===
-      // Right side (darker)
-      ctx.fillStyle = colors.boxDark
+      // === SHADOW ===
+      ctx.fillStyle = "rgba(0, 0, 0, 0.25)"
       ctx.beginPath()
-      ctx.moveTo(x + boxWidth / 2, y - boxHeight / 2 + cornerRadius)
-      ctx.lineTo(x + boxWidth / 2 + depth3D, y - boxHeight / 2 + cornerRadius - depth3D * 0.5)
-      ctx.lineTo(x + boxWidth / 2 + depth3D, y + boxHeight / 2 - depth3D * 0.5)
-      ctx.lineTo(x + boxWidth / 2, y + boxHeight / 2)
-      ctx.closePath()
+      ctx.ellipse(x, y + boxHeight * 0.55, boxWidth * 0.45, boxWidth * 0.1, 0, 0, Math.PI * 2)
       ctx.fill()
       
-      // Top edge (lighter for depth)
-      const topGradient = ctx.createLinearGradient(x, y - boxHeight / 2 - depth3D, x, y - boxHeight / 2)
-      topGradient.addColorStop(0, colors.box)
-      topGradient.addColorStop(1, colors.boxDark)
-      ctx.fillStyle = topGradient
-      ctx.beginPath()
-      ctx.moveTo(x - boxWidth / 2 + cornerRadius, y - boxHeight / 2)
-      ctx.lineTo(x - boxWidth / 2 + cornerRadius + depth3D, y - boxHeight / 2 - depth3D * 0.5)
-      ctx.lineTo(x + boxWidth / 2 + depth3D, y - boxHeight / 2 - depth3D * 0.5)
-      ctx.lineTo(x + boxWidth / 2, y - boxHeight / 2)
-      ctx.closePath()
-      ctx.fill()
-      
-      // Main front face
+      // === BOX BODY ===
+      // Main box with gradient
       const boxGradient = ctx.createLinearGradient(x - boxWidth / 2, y - boxHeight / 2, x + boxWidth / 2, y + boxHeight / 2)
       boxGradient.addColorStop(0, colors.box)
-      boxGradient.addColorStop(0.3, colors.box)
       boxGradient.addColorStop(1, colors.boxDark)
       ctx.fillStyle = boxGradient
       ctx.beginPath()
       ctx.roundRect(x - boxWidth / 2, y - boxHeight / 2, boxWidth, boxHeight, cornerRadius)
       ctx.fill()
       
-      // Shine overlay on box
-      const shineGradient = ctx.createLinearGradient(x - boxWidth / 2, y - boxHeight / 2, x - boxWidth / 4, y)
-      shineGradient.addColorStop(0, "rgba(255, 255, 255, 0.25)")
-      shineGradient.addColorStop(0.5, "rgba(255, 255, 255, 0.08)")
-      shineGradient.addColorStop(1, "rgba(255, 255, 255, 0)")
-      ctx.fillStyle = shineGradient
+      // Box border for visibility
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.3)"
+      ctx.lineWidth = 2
+      ctx.stroke()
+      
+      // Shine effect
+      ctx.fillStyle = "rgba(255, 255, 255, 0.15)"
       ctx.beginPath()
-      ctx.roundRect(x - boxWidth / 2, y - boxHeight / 2, boxWidth, boxHeight, cornerRadius)
+      ctx.roundRect(x - boxWidth / 2 + 4, y - boxHeight / 2 + 4, boxWidth * 0.4, boxHeight * 0.3, cornerRadius * 0.5)
       ctx.fill()
       
-      // === RIBBON (Vertical) ===
-      const ribbonWidth = boxWidth * 0.18
-      const ribbonGradient = ctx.createLinearGradient(x - ribbonWidth / 2, 0, x + ribbonWidth / 2, 0)
-      ribbonGradient.addColorStop(0, colors.ribbon)
-      ribbonGradient.addColorStop(0.3, colors.ribbonLight)
-      ribbonGradient.addColorStop(0.5, colors.ribbon)
-      ribbonGradient.addColorStop(0.7, colors.ribbonLight)
-      ribbonGradient.addColorStop(1, colors.ribbon)
+      // === RIBBONS ===
+      const ribbonWidth = boxWidth * 0.2
       
-      ctx.fillStyle = ribbonGradient
+      // Vertical ribbon
+      ctx.fillStyle = colors.ribbon
       ctx.fillRect(x - ribbonWidth / 2, y - boxHeight / 2, ribbonWidth, boxHeight)
       
-      // Ribbon on 3D top
-      ctx.fillRect(x - ribbonWidth / 2 + depth3D * 0.5, y - boxHeight / 2 - depth3D * 0.4, ribbonWidth, depth3D * 0.5)
+      // Ribbon highlight
+      ctx.fillStyle = colors.ribbonLight
+      ctx.fillRect(x - ribbonWidth / 4, y - boxHeight / 2, ribbonWidth / 3, boxHeight)
       
-      // === RIBBON (Horizontal) ===
-      const hRibbonGradient = ctx.createLinearGradient(0, y - ribbonWidth / 2, 0, y + ribbonWidth / 2)
-      hRibbonGradient.addColorStop(0, colors.ribbon)
-      hRibbonGradient.addColorStop(0.3, colors.ribbonLight)
-      hRibbonGradient.addColorStop(0.5, colors.ribbon)
-      hRibbonGradient.addColorStop(0.7, colors.ribbonLight)
-      hRibbonGradient.addColorStop(1, colors.ribbon)
-      
-      ctx.fillStyle = hRibbonGradient
+      // Horizontal ribbon
+      ctx.fillStyle = colors.ribbon
       ctx.fillRect(x - boxWidth / 2, y - ribbonWidth / 2, boxWidth, ribbonWidth)
       
-      // === ELEGANT BOW ===
-      const bowY = y - boxHeight / 2 - lidLift - finalSize * 0.05
-      const bowScale = 1 - lidTilt * 0.5
+      // Horizontal ribbon highlight
+      ctx.fillStyle = colors.ribbonLight
+      ctx.fillRect(x - boxWidth / 2, y - ribbonWidth / 4, boxWidth, ribbonWidth / 3)
       
-      ctx.save()
-      ctx.translate(x, bowY)
-      ctx.rotate(-lidTilt)
-      ctx.translate(-x, -bowY)
+      // === BOW ===
+      const bowY = y - boxHeight / 2 - lidLift - finalSize * 0.08
+      const bowSize = finalSize * 0.22
       
-      // Bow ribbon tails
+      // Bow loops
+      ctx.fillStyle = colors.ribbon
+      ctx.beginPath()
+      ctx.ellipse(x - bowSize, bowY, bowSize * 0.9, bowSize * 0.5, -0.3, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.beginPath()
+      ctx.ellipse(x + bowSize, bowY, bowSize * 0.9, bowSize * 0.5, 0.3, 0, Math.PI * 2)
+      ctx.fill()
+      
+      // Bow center
+      ctx.fillStyle = colors.ribbonLight
+      ctx.beginPath()
+      ctx.arc(x, bowY, bowSize * 0.35, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = colors.ribbon
+      ctx.beginPath()
+      ctx.arc(x, bowY, bowSize * 0.25, 0, Math.PI * 2)
+      ctx.fill()
+      
+      // Bow tails
       ctx.strokeStyle = colors.ribbon
-      ctx.lineWidth = ribbonWidth * 0.6
+      ctx.lineWidth = ribbonWidth * 0.4
       ctx.lineCap = "round"
-      
-      // Left tail
       ctx.beginPath()
-      ctx.moveTo(x - finalSize * 0.05, bowY + finalSize * 0.02)
-      ctx.quadraticCurveTo(x - finalSize * 0.2, bowY + finalSize * 0.15, x - finalSize * 0.25 * bowScale, bowY + finalSize * 0.25 * bowScale)
+      ctx.moveTo(x - bowSize * 0.3, bowY + bowSize * 0.2)
+      ctx.quadraticCurveTo(x - bowSize * 0.8, bowY + bowSize * 0.8, x - bowSize * 1.2, bowY + bowSize * 1.1)
+      ctx.stroke()
+      ctx.beginPath()
+      ctx.moveTo(x + bowSize * 0.3, bowY + bowSize * 0.2)
+      ctx.quadraticCurveTo(x + bowSize * 0.8, bowY + bowSize * 0.8, x + bowSize * 1.2, bowY + bowSize * 1.1)
       ctx.stroke()
       
-      // Right tail  
-      ctx.beginPath()
-      ctx.moveTo(x + finalSize * 0.05, bowY + finalSize * 0.02)
-      ctx.quadraticCurveTo(x + finalSize * 0.2, bowY + finalSize * 0.15, x + finalSize * 0.25 * bowScale, bowY + finalSize * 0.25 * bowScale)
-      ctx.stroke()
-      
-      // Bow loops with gradient
-      const loopSize = finalSize * 0.18 * bowScale
-      
-      // Left loop
-      const leftLoopGrad = ctx.createRadialGradient(x - loopSize * 0.8, bowY, 0, x - loopSize * 0.8, bowY, loopSize)
-      leftLoopGrad.addColorStop(0, colors.ribbonLight)
-      leftLoopGrad.addColorStop(0.5, colors.ribbon)
-      leftLoopGrad.addColorStop(1, colors.ribbon)
-      ctx.fillStyle = leftLoopGrad
-      ctx.beginPath()
-      ctx.ellipse(x - loopSize * 0.9, bowY, loopSize, loopSize * 0.55, -0.4, 0, Math.PI * 2)
-      ctx.fill()
-      
-      // Right loop
-      const rightLoopGrad = ctx.createRadialGradient(x + loopSize * 0.8, bowY, 0, x + loopSize * 0.8, bowY, loopSize)
-      rightLoopGrad.addColorStop(0, colors.ribbonLight)
-      rightLoopGrad.addColorStop(0.5, colors.ribbon)
-      rightLoopGrad.addColorStop(1, colors.ribbon)
-      ctx.fillStyle = rightLoopGrad
-      ctx.beginPath()
-      ctx.ellipse(x + loopSize * 0.9, bowY, loopSize, loopSize * 0.55, 0.4, 0, Math.PI * 2)
-      ctx.fill()
-      
-      // Center knot with highlight
-      const knotGrad = ctx.createRadialGradient(x - finalSize * 0.02, bowY - finalSize * 0.02, 0, x, bowY, finalSize * 0.1)
-      knotGrad.addColorStop(0, colors.ribbonLight)
-      knotGrad.addColorStop(0.7, colors.ribbon)
-      knotGrad.addColorStop(1, colors.ribbon)
-      ctx.fillStyle = knotGrad
-      ctx.beginPath()
-      ctx.ellipse(x, bowY, finalSize * 0.08 * bowScale, finalSize * 0.06 * bowScale, 0, 0, Math.PI * 2)
-      ctx.fill()
-      
-      ctx.restore()
-      
-      // === HOVER INDICATOR (subtle) ===
+      // === HOVER RING ===
       if (isHovered && !openAnimation) {
-        const pulsePhase = Math.sin(time * 3) * 0.5 + 0.5
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.2 + pulsePhase * 0.15})`
-        ctx.lineWidth = 1.5
+        ctx.strokeStyle = `rgba(255, 215, 0, ${0.6 + Math.sin(time * 4) * 0.2})`
+        ctx.lineWidth = 3
+        ctx.setLineDash([8, 4])
+        ctx.lineDashOffset = -time * 30
         ctx.beginPath()
-        ctx.roundRect(x - boxWidth / 2 - 4, y - boxHeight / 2 - 4, boxWidth + 8, boxHeight + 8, cornerRadius + 3)
+        ctx.roundRect(x - boxWidth / 2 - 8, y - boxHeight / 2 - 8, boxWidth + 16, boxHeight + 16, cornerRadius + 5)
         ctx.stroke()
+        ctx.setLineDash([])
+      }
+      
+      // === BOUNCING INDICATOR ===
+      if (isBouncing && !openAnimation) {
+        const bounceTime = (now - bounceStartTime) / 1000
+        const indicatorAlpha = Math.max(0, 1 - bounceTime * 0.06) // Slower fade
+        
+        if (indicatorAlpha > 0) {
+          // Subtle glowing ring
+          ctx.strokeStyle = `rgba(255, 220, 100, ${0.25 * indicatorAlpha + Math.sin(time * 2) * 0.1})`
+          ctx.lineWidth = 1.5
+          ctx.beginPath()
+          ctx.arc(x, y, boxWidth * 0.75, 0, Math.PI * 2)
+          ctx.stroke()
+          
+          // Small arrow pointing down (gentle float)
+          const arrowY = y - boxHeight / 2 - finalSize * 0.3 + Math.sin(time * 2) * 3
+          ctx.fillStyle = `rgba(255, 230, 150, ${0.6 * indicatorAlpha})`
+          ctx.beginPath()
+          ctx.moveTo(x, arrowY + 10)
+          ctx.lineTo(x - 6, arrowY)
+          ctx.lineTo(x + 6, arrowY)
+          ctx.closePath()
+          ctx.fill()
+        }
       }
       
       ctx.restore()
-      ctx.globalAlpha = 1
       
-      // Return hit box for click detection
+      // Return hit box
       return {
-        minX: x - boxWidth / 2 - 10,
-        maxX: x + boxWidth / 2 + 10,
-        minY: y - boxHeight / 2 - finalSize * 0.4 - 10,
-        maxY: y + boxHeight / 2 + 10,
+        minX: x - boxWidth / 2 - 15,
+        maxX: x + boxWidth / 2 + 15,
+        minY: y - boxHeight / 2 - finalSize * 0.4 - 15,
+        maxY: y + boxHeight / 2 + 15,
       }
     }
 
@@ -662,8 +634,12 @@ export function ChristmasTreeHero() {
       })
       
       if (clickedGift) {
+        // Check if all gifts already opened
+        if (currentStepRef.current >= STEPS.length) return
+        
         // Open the gift!
         clickedGift.gift.isOpened = true
+        clickedGift.gift.isBouncing = false // Stop bouncing if it was
         spawnParticles(clickedGift.proj.x, clickedGift.proj.y, 15)
         
         // Clear previous timeout if clicking another gift quickly
@@ -671,18 +647,35 @@ export function ChristmasTreeHero() {
           clearTimeout(wishTimeoutRef.current)
         }
         
-        // Show wish with animation
-        setActiveWish({
-          text: WISHES[clickedGift.gift.wishIndex],
-          x: clickedGift.proj.x,
-          y: clickedGift.proj.y,
-        })
+        // Show step message (sequential, not based on which gift)
+        const stepMessage = STEPS[currentStepRef.current]
+        currentStepRef.current += 1
+        setCurrentStep(currentStepRef.current)
+        
+        setActiveWish({ text: stepMessage })
         setShowWish(true)
         
-        // Hide wish after 3.5 seconds, allowing click on other gifts
+        // Make remaining unopened gifts bounce to guide user
+        const unopenedGifts = giftBoxesRef.current.filter(g => !g.isOpened)
+        const now = Date.now()
+        
+        // Pick 2-3 random unopened gifts to bounce
+        const bouncingCount = Math.min(3, unopenedGifts.length)
+        const shuffled = unopenedGifts.sort(() => Math.random() - 0.5)
+        
+        // Reset all bouncing first
+        giftBoxesRef.current.forEach(g => g.isBouncing = false)
+        
+        // Set new bouncing gifts
+        for (let i = 0; i < bouncingCount; i++) {
+          shuffled[i].isBouncing = true
+          shuffled[i].bounceStartTime = now + i * 200 // Stagger start times
+        }
+        
+        // Hide wish after 4 seconds
         wishTimeoutRef.current = setTimeout(() => {
           setShowWish(false)
-        }, 3500)
+        }, 4000)
         return
       }
       
@@ -886,6 +879,8 @@ export function ChristmasTreeHero() {
             gift.openAnimation,
             gift.floatOffset,
             gift.sparklePhase,
+            gift.isBouncing,
+            gift.bounceStartTime,
             fadeIn * (1 - explodeFactor * 0.5)
           )
           
@@ -941,42 +936,39 @@ export function ChristmasTreeHero() {
     <div className="relative h-screen w-full overflow-hidden bg-[#050505]">
       <canvas ref={canvasRef} className="absolute inset-0 cursor-grab active:cursor-grabbing" />
 
-      {/* Wish Display - emerges from gift box */}
+      {/* Wish Display - centered on screen */}
       {activeWish && (
         <div
-          className="pointer-events-none absolute z-30"
-          style={{
-            left: activeWish.x,
-            top: activeWish.y,
-            transform: "translate(-50%, -50%)",
-          }}
+          className={`pointer-events-none fixed inset-x-0 top-1/3 z-30 flex justify-center px-4 transition-all duration-700 ease-out ${
+            showWish 
+              ? "opacity-100 translate-y-0" 
+              : "opacity-0 translate-y-8"
+          }`}
         >
-          <div
-            className={`transition-all duration-700 ease-out ${
-              showWish 
-                ? "opacity-100 translate-y-[-120px] scale-100" 
-                : "opacity-0 translate-y-0 scale-75"
-            }`}
-          >
-            {/* Simple elegant card */}
-            <div className="relative rounded-2xl border border-white/20 bg-gray-900/95 px-6 py-5 shadow-xl backdrop-blur-md">
-              
-              {/* Subtle top accent */}
-              <div className="absolute top-0 left-1/2 h-0.5 w-16 -translate-x-1/2 rounded-full bg-gradient-to-r from-transparent via-amber-400/50 to-transparent" />
-              
-              {/* Wish text */}
-              <p className="max-w-xs text-center text-base font-light leading-relaxed text-white/90">
-                {activeWish.text}
-              </p>
-              
-              {/* Subtle bottom accent */}
-              <div className="absolute bottom-0 left-1/2 h-0.5 w-12 -translate-x-1/2 rounded-full bg-gradient-to-r from-transparent via-white/30 to-transparent" />
-              
-              {/* Small arrow pointing to gift */}
-              <div className="absolute -bottom-2 left-1/2 -translate-x-1/2">
-                <div className="h-0 w-0 border-l-[8px] border-r-[8px] border-t-[8px] border-l-transparent border-r-transparent border-t-gray-900/95" />
-              </div>
+          <div className="relative max-w-md rounded-2xl border border-white/15 bg-black/80 px-8 py-6 shadow-2xl backdrop-blur-xl">
+            
+            {/* Top accent line */}
+            <div className="absolute top-0 left-1/2 h-px w-20 -translate-x-1/2 bg-gradient-to-r from-transparent via-amber-400/60 to-transparent" />
+            
+            {/* Step indicator */}
+            <div className="mb-3 flex justify-center gap-1.5">
+              {STEPS.map((_, i) => (
+                <div 
+                  key={i} 
+                  className={`h-1.5 w-1.5 rounded-full transition-all duration-300 ${
+                    i < currentStep ? "bg-amber-400" : "bg-white/20"
+                  }`} 
+                />
+              ))}
             </div>
+            
+            {/* Wish text */}
+            <p className="text-center text-base leading-relaxed text-white/90 sm:text-lg">
+              {activeWish.text}
+            </p>
+            
+            {/* Bottom accent line */}
+            <div className="absolute bottom-0 left-1/2 h-px w-16 -translate-x-1/2 bg-gradient-to-r from-transparent via-white/30 to-transparent" />
           </div>
         </div>
       )}
